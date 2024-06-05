@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 
 
-class Client:
+class Local_Trainer:
     # 构造函数
     def __init__(self, conf, model, train_dataset, id=1):
         # 配置文件
