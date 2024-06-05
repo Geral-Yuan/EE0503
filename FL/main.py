@@ -1,14 +1,33 @@
 import argparse
 import json
-import random
 import socket
 import numpy as np
 import pickle
+import struct
 
 import datasets
 from local_trainer import *
 from model import *
 from partition_diff import *
+
+# 发送数据，使用固定大小的头部表示数据大小
+def send_data(sock, data):
+    data = pickle.dumps(data)
+    data_size = struct.pack('>I', len(data))  # 4 字节表示数据大小
+    sock.sendall(data_size + data)
+
+# 接收数据，使用固定大小的头部
+def receive_data(sock):
+    data_size = struct.unpack('>I', sock.recv(4))[0]  # 读取 4 字节表示的数据大小
+    recv_data = b''
+    while len(recv_data) < data_size:
+        packet = sock.recv(4096)
+        if not packet:
+            break
+        recv_data += packet
+    if len(recv_data) != data_size:
+        raise ValueError(f"Expected {data_size} bytes, but received {len(recv_data)} bytes")
+    return pickle.loads(recv_data)
 
 if __name__ == '__main__':
 
@@ -81,7 +100,8 @@ if __name__ == '__main__':
     )
     
     # 创建本地模型
-    local_model = MNISTNet()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    local_model = MNISTNet().to(device)
     
     for e in range(conf["global_epochs"]):
         # 拷贝本地模型进行本地训练得到参数差值
@@ -90,63 +110,50 @@ if __name__ == '__main__':
         flat_diff *= train_ratio
         param_diff_blocks = split_flat_diff(flat_diff, no_models)
         
+        
         for j in range(no_models-1):
+            print(f"Round {j} of sending and receiving data ...")
             recv_np_array = None
             if id % 2 == 0:
-                # 发送参数差值给server结点
-                send_data = pickle.dumps(param_diff_blocks[(id+no_models-j)%no_models])
-                local_client_socket.sendall(send_data)
-                
-                # 接收client结点传来的参数差值
-                recv_data = b''
-                while True:
-                    packet = client_socket.recv(4096)
-                    if not packet: break
-                    recv_data += packet
-                recv_np_array = pickle.loads(recv_data)
+                # 发送参数差值给服务器节点
+                send_data(local_client_socket, param_diff_blocks[(id+no_models-j)%no_models])
+                print(f"Sent data size: {len(pickle.dumps(param_diff_blocks[(id+no_models-j)%no_models]))}")
+
+                # 接收客户端节点传来的参数差值
+                recv_np_array = receive_data(client_socket)
+                print(f"Received data size: {len(pickle.dumps(recv_np_array))}")
                 
             else:
-                # 接收client结点传来的参数差值
-                recv_data = b''
-                while True:
-                    packet = client_socket.recv(4096)
-                    if not packet: break
-                    recv_data += packet
-                recv_np_array = pickle.loads(recv_data)
+                # 接收客户端节点传来的参数差值
+                recv_np_array = receive_data(client_socket)
+                print(f"Received data size: {len(pickle.dumps(recv_np_array))}")
 
-                # 发送参数差值给server结点
-                send_data = pickle.dumps(param_diff_blocks[(id+no_models-j)%no_models])
-                local_client_socket.sendall(send_data)
+                # 发送参数差值给服务器节点
+                send_data(local_client_socket, param_diff_blocks[(id+no_models-j)%no_models])
+                print(f"Sent data size: {len(pickle.dumps(param_diff_blocks[(id+no_models-j)%no_models]))}")
             
             param_diff_blocks[(id+no_models-j-1)%no_models] += recv_np_array
         
         for j in range(no_models-1):
+            print(f"Round {j} of broadcasting data ...")
             recv_np_array = None
             if id % 2 == 0:
                 # 发送聚合后的参数差值给server结点
-                send_data = pickle.dumps(param_diff_blocks[(id+no_models-j+1)%no_models])
-                local_client_socket.sendall(send_data)
+                send_data(local_client_socket, param_diff_blocks[(id+no_models-j+1)%no_models])
+                print(f"Sent data size: {len(pickle.dumps(param_diff_blocks[(id+no_models-j+1)%no_models]))}")
                 
                 # 接收client结点传来的聚合后的参数差值
-                recv_data = b''
-                while True:
-                    packet = client_socket.recv(4096)
-                    if not packet: break
-                    recv_data += packet
-                recv_np_array = pickle.loads(recv_data)
+                recv_np_array = receive_data(client_socket)
+                print(f"Received data size: {len(pickle.dumps(recv_np_array))}")
             
             else:
                 # 接收client结点传来的聚合后的参数差值
-                recv_data = b''
-                while True:
-                    packet = client_socket.recv(4096)
-                    if not packet: break
-                    recv_data += packet
-                recv_np_array = pickle.loads(recv_data)
+                recv_np_array = receive_data(client_socket)
+                print(f"Received data size: {len(pickle.dumps(recv_np_array))}")
                 
                 # 发送聚合后的参数差值给server结点
-                send_data = pickle.dumps(param_diff_blocks[(id+no_models-j+1)%no_models])
-                local_client_socket.sendall(send_data)
+                send_data(local_client_socket, param_diff_blocks[(id+no_models-j+1)%no_models])
+                print(f"Sent data size: {len(pickle.dumps(param_diff_blocks[(id+no_models-j+1)%no_models]))}")
                 
             param_diff_blocks[(id+no_models-j)%no_models] = np.copy(recv_np_array)
             

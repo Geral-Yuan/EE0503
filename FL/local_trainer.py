@@ -63,6 +63,6 @@ class Local_Trainer:
         for name, data in self.local_model.state_dict().items():
             # 计算训练后与训练前的差值
             diff[name] = (data - model.state_dict()[name])
-        print("Client %d local train done" % self.client_id)
+        print("Node %d local train done" % self.client_id)
         # 客户端返回差值
         return diff
