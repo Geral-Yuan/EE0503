@@ -42,7 +42,9 @@ if __name__ == '__main__':
     # 读取配置文件
     with open(args.conf, 'r') as f:
         conf = json.load(f)
-        
+    
+    ip_addr_list = ["192.168.137.202", "192.168.137.193", "192.168.137.19", "192.168.137.171"]
+    
     id = args.id
     local_port = args.port
     no_models = conf["no_models"]
@@ -57,20 +59,21 @@ if __name__ == '__main__':
         
     # 创建本地服务器
     local_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    host = socket.gethostname()
-    local_socket.bind((host, local_port))
+    ip_addr = ip_addr_list[id]
+    local_socket.bind((ip_addr, local_port))
     local_socket.listen(5)
     print("Listening on port", local_port)
     
     local_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket = None
     
-    server_host = input("Please input the server host: ")
+    # server_host = input("Please input the server host: ")
+    server_addr = ip_addr_list[(id+1)%no_models]
     server_port = int(input("Please input the server port: "))
     # 连接server结点同时接受client结点的连接请求
     if id != 0:
         # 连接server结点
-        local_client_socket.connect((server_host, server_port))
+        local_client_socket.connect((server_addr, server_port))
         
         # 接受client结点的连接请求
         client_socket, addr = local_socket.accept()
