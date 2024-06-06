@@ -44,9 +44,9 @@ class Local_Trainer:
             for batch_id, batch in enumerate(self.train_loader):
                 data, target = batch
                 # 加载到gpu
-                if torch.cuda.is_available():
-                    data = data.cuda()
-                    target = target.cuda()
+                # if torch.cuda.is_available():
+                #     data = data.cuda()
+                #     target = target.cuda()
                 # 梯度
                 optimizer.zero_grad()
                 # 训练预测

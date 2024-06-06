@@ -5,7 +5,7 @@ def flatten_diff(diff):
     flat_diff = []
     shape_info = {}
     for name, param in diff.items():
-        flat_diff.append(param.view(-1).cpu().numpy())
+        flat_diff.append(param.view(-1).numpy())
         shape_info[name] = param.shape
     flat_diff = np.concatenate(flat_diff)
     return flat_diff, shape_info

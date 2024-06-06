@@ -14,7 +14,10 @@ from partition_diff import *
 def send_data(sock, data):
     data = pickle.dumps(data)
     data_size = struct.pack('>I', len(data))  # 4 字节表示数据大小
-    sock.sendall(data_size + data)
+    sock.sendall(data_size)
+    # 分块发送数据
+    for i in range(0, len(data), 4096):
+        sock.sendall(data[i:i + 4096])
 
 # 接收数据，使用固定大小的头部
 def receive_data(sock):
@@ -59,7 +62,8 @@ if __name__ == '__main__':
         
     # 创建本地服务器
     local_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    ip_addr = ip_addr_list[id]
+    ip_addr = "localhost"
+    # ip_addr = ip_addr_list[id]
     local_socket.bind((ip_addr, local_port))
     local_socket.listen(5)
     print("Listening on port", local_port)
@@ -67,8 +71,8 @@ if __name__ == '__main__':
     local_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket = None
     
-    # server_host = input("Please input the server host: ")
-    server_addr = ip_addr_list[(id+1)%no_models]
+    server_addr = "localhost"
+    # server_addr = ip_addr_list[(id+1)%no_models]
     server_port = int(input("Please input the server port: "))
     # 连接server结点同时接受client结点的连接请求
     if id != 0:
@@ -103,8 +107,7 @@ if __name__ == '__main__':
     )
     
     # 创建本地模型
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    local_model = MNISTNet().to(device)
+    local_model = MNISTNet()
     
     for e in range(conf["global_epochs"]):
         # 拷贝本地模型进行本地训练得到参数差值
@@ -164,7 +167,7 @@ if __name__ == '__main__':
         global_diff = unflatten_diff(global_flat_diff, shape_info)
         
         for name, param in global_diff.items():
-            global_diff[name] = param.to(device)
+            global_diff[name] = param
         
         # 更新模型参数
         for name, data in local_model.state_dict().items():
@@ -181,9 +184,9 @@ if __name__ == '__main__':
             # 获取所有的样本总量大小
             dataset_size += data.size()[0]
             # 存储到gpu
-            if torch.cuda.is_available():
-                data = data.cuda()
-                target = target.cuda()
+            # if torch.cuda.is_available():
+            #     data = data.cuda()
+            #     target = target.cuda()
             # 加载到模型中训练
             output = local_model(data)
             # 聚合所有的损失 cross_entropy交叉熵函数计算损失
@@ -195,7 +198,7 @@ if __name__ == '__main__':
             # 获取最大的对数概率的索引值， 即在所有预测结果中选择可能性最大的作为最终的分类结果
             pred = output.data.max(1)[1]
             # 统计预测结果与真实标签target的匹配总个数
-            correct += pred.eq(target.data.view_as(pred)).cpu().sum().item()
+            correct += pred.eq(target.data.view_as(pred)).sum().item()
         acc = 100.0 * (float(correct) / float(dataset_size))  # 计算准确率
         total_l = total_loss / dataset_size  # 计算损失值
 
