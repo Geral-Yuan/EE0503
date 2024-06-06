@@ -86,7 +86,7 @@ if __name__ == '__main__':
         input("Press Enter to continue...")
         
         # 连接server结点
-        local_client_socket.connect((server_host, server_port))
+        local_client_socket.connect((server_addr, server_port))
     
 
     # 获取数据集, 加载描述信息
