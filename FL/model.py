@@ -3,6 +3,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# class MNISTNet(nn.Module):
+#     def __init__(self):
+#         super(MNISTNet, self).__init__()
+#         self.fc = nn.Linear(784, 10)
+    
+#     def forward(self, x):
+#         x = x.view(-1, 784)
+#         return self.fc(x)
+
 class MNISTNet(nn.Module):
     def __init__(self):
         super(MNISTNet, self).__init__()

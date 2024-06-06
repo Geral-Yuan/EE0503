@@ -160,6 +160,9 @@ if __name__ == '__main__':
         global_flat_diff = np.concatenate(param_diff_blocks)
         global_diff = unflatten_diff(global_flat_diff, shape_info)
         
+        for name, param in global_diff.items():
+            global_diff[name] = param.to(device)
+        
         # 更新模型参数
         for name, data in local_model.state_dict().items():
             local_model.state_dict()[name].add_(global_diff[name])
