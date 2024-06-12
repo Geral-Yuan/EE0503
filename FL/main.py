@@ -10,27 +10,33 @@ from local_trainer import *
 from model import *
 from partition_diff import *
 
-# 发送数据，使用固定大小的头部表示数据大小
 def send_data(sock, data):
-    data = pickle.dumps(data)
-    data_size = struct.pack('>I', len(data))  # 4 字节表示数据大小
-    sock.sendall(data_size)
-    # 分块发送数据
-    for i in range(0, len(data), 4096):
-        sock.sendall(data[i:i + 4096])
+    try:
+        data = pickle.dumps(data)
+        data_size = struct.pack('>I', len(data))  # 4 字节表示数据大小
+        sock.sendall(data_size)
+        # 分块发送数据
+        for i in range(0, len(data), 4096):
+            sock.sendall(data[i:i + 4096])
+    except (socket.error, pickle.PicklingError) as e:
+        print(f"Send error: {e}")
+        # 根据需要添加重试或记录日志的逻辑
 
-# 接收数据，使用固定大小的头部
 def receive_data(sock):
-    data_size = struct.unpack('>I', sock.recv(4))[0]  # 读取 4 字节表示的数据大小
-    recv_data = b''
-    while len(recv_data) < data_size:
-        packet = sock.recv(4096)
-        if not packet:
-            break
-        recv_data += packet
-    if len(recv_data) != data_size:
-        raise ValueError(f"Expected {data_size} bytes, but received {len(recv_data)} bytes")
-    return pickle.loads(recv_data)
+    try:
+        data_size = struct.unpack('>I', sock.recv(4))[0]  # 读取 4 字节表示的数据大小
+        recv_data = b''
+        while len(recv_data) < data_size:
+            packet = sock.recv(min(4096, data_size - len(recv_data)))
+            if not packet:
+                break
+            recv_data += packet
+        if len(recv_data) != data_size:
+            raise ValueError(f"Expected {data_size} bytes, but received {len(recv_data)} bytes")
+        return pickle.loads(recv_data)
+    except (socket.error, pickle.UnpicklingError, ValueError) as e:
+        print(f"Receive error: {e}")
+        # 根据需要添加重试或记录日志的逻辑
 
 if __name__ == '__main__':
 
@@ -46,7 +52,7 @@ if __name__ == '__main__':
     with open(args.conf, 'r') as f:
         conf = json.load(f)
     
-    ip_addr_list = ["192.168.137.202", "192.168.137.193", "192.168.137.19", "192.168.137.171"]
+    # ip_addr_list = ["192.168.137.14", "192.168.137.148", "192.168.137.210", "192.168.137.202"]
     
     id = args.id
     local_port = args.port
@@ -74,6 +80,7 @@ if __name__ == '__main__':
     server_addr = "localhost"
     # server_addr = ip_addr_list[(id+1)%no_models]
     server_port = int(input("Please input the server port: "))
+    # server_port = local_port
     # 连接server结点同时接受client结点的连接请求
     if id != 0:
         # 连接server结点
