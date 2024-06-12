@@ -1,7 +1,7 @@
 {
   "no_models" : 4,
   "type" : "mnist",
-  "global_epochs" : 5,
+  "global_epochs" : 2,
   "local_epochs" : 3,
   "k" : 2,
   "batch_size" : 32,

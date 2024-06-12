@@ -30,7 +30,7 @@ def get_dataset(dir, name):
     return train_dataset, eval_dataset
 
 def get_non_iid_subset(dataset, id):
-    label_partition = [[0,1,2],[3,4],[5,6,7],[8,9]] # to modify to be scalable
-    indices = [i for i, (_, label) in enumerate(dataset) if label in label_partition[id]]
+    label_partition = [[0,1,2],[3,4],[5,6,7],[8,9]]
+    indices = [i for i, (_, label) in enumerate(dataset) if label in label_partition[id%4]]
     subdataset = Subset(dataset, indices)
     return subdataset, len(subdataset)/len(dataset)

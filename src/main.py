@@ -4,6 +4,7 @@ import socket
 import numpy as np
 import pickle
 import struct
+import threading
 
 import datasets
 from local_trainer import *
@@ -37,6 +38,11 @@ def receive_data(sock):
     except (socket.error, pickle.UnpicklingError, ValueError) as e:
         print(f"Receive error: {e}")
         # 根据需要添加重试或记录日志的逻辑
+
+# 用来发送数据的线程
+def send_data_thread(sock, data):
+    send_data(sock, data)
+    print(f"Sent data size: {len(pickle.dumps(data))}")
 
 if __name__ == '__main__':
 
@@ -123,51 +129,40 @@ if __name__ == '__main__':
         flat_diff *= train_ratio
         param_diff_blocks = split_flat_diff(flat_diff, no_models)
         
-        
         for j in range(no_models-1):
             print(f"Round {j} of sending and receiving data ...")
-            recv_np_array = None
-            if id % 2 == 0:
-                # 发送参数差值给服务器节点
-                send_data(local_client_socket, param_diff_blocks[(id+no_models-j)%no_models])
-                print(f"Sent data size: {len(pickle.dumps(param_diff_blocks[(id+no_models-j)%no_models]))}")
-
-                # 接收客户端节点传来的参数差值
-                recv_np_array = receive_data(client_socket)
-                print(f"Received data size: {len(pickle.dumps(recv_np_array))}")
-                
-            else:
-                # 接收客户端节点传来的参数差值
-                recv_np_array = receive_data(client_socket)
-                print(f"Received data size: {len(pickle.dumps(recv_np_array))}")
-
-                # 发送参数差值给服务器节点
-                send_data(local_client_socket, param_diff_blocks[(id+no_models-j)%no_models])
-                print(f"Sent data size: {len(pickle.dumps(param_diff_blocks[(id+no_models-j)%no_models]))}")
             
+            # 子线程发送参数差值给服务器节点
+            data_to_send = param_diff_blocks[(id+no_models-j)%no_models]
+            send_thread = threading.Thread(target=send_data_thread, args=(local_client_socket, data_to_send))
+            send_thread.start()
+            
+            # 接收客户端节点传来的参数差值
+            recv_np_array = receive_data(client_socket)
+            print(f"Received data size: {len(pickle.dumps(recv_np_array))}")
+            
+            # 等待子线程结束
+            send_thread.join()
+            
+            # 聚合参数差值
             param_diff_blocks[(id+no_models-j-1)%no_models] += recv_np_array
         
         for j in range(no_models-1):
             print(f"Round {j} of broadcasting data ...")
-            recv_np_array = None
-            if id % 2 == 0:
-                # 发送聚合后的参数差值给server结点
-                send_data(local_client_socket, param_diff_blocks[(id+no_models-j+1)%no_models])
-                print(f"Sent data size: {len(pickle.dumps(param_diff_blocks[(id+no_models-j+1)%no_models]))}")
-                
-                # 接收client结点传来的聚合后的参数差值
-                recv_np_array = receive_data(client_socket)
-                print(f"Received data size: {len(pickle.dumps(recv_np_array))}")
             
-            else:
-                # 接收client结点传来的聚合后的参数差值
-                recv_np_array = receive_data(client_socket)
-                print(f"Received data size: {len(pickle.dumps(recv_np_array))}")
-                
-                # 发送聚合后的参数差值给server结点
-                send_data(local_client_socket, param_diff_blocks[(id+no_models-j+1)%no_models])
-                print(f"Sent data size: {len(pickle.dumps(param_diff_blocks[(id+no_models-j+1)%no_models]))}")
-                
+            # 子线程发送聚合后的参数差值给server结点
+            data_to_send = param_diff_blocks[(id+no_models-j+1)%no_models]
+            send_thread = threading.Thread(target=send_data_thread, args=(local_client_socket, data_to_send))
+            send_thread.start()
+            
+            # 接收client结点传来的聚合后的参数差值
+            recv_np_array = receive_data(client_socket)
+            print(f"Received data size: {len(pickle.dumps(recv_np_array))}")
+            
+            # 等待子线程结束
+            send_thread.join()
+            
+            # 更新为聚合后的参数差值
             param_diff_blocks[(id+no_models-j)%no_models] = np.copy(recv_np_array)
             
         global_flat_diff = np.concatenate(param_diff_blocks)
@@ -211,3 +206,5 @@ if __name__ == '__main__':
 
         print("Epoch %d, acc: %f, loss: %f\n" % (e, acc, total_loss))
         
+    local_socket.close()
+    local_client_socket.close()
