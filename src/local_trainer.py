@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 
 class Local_Trainer:
     # 构造函数
-    def __init__(self, conf, model, train_dataset, id=1):
+    def __init__(self, conf, no_models, model, train_dataset, id=1):
         # 配置文件
         self.conf = conf
         # 客户端本地模型(一般由服务器传输)
@@ -15,7 +15,7 @@ class Local_Trainer:
         self.train_dataset = train_dataset
         # 按ID对训练集合的拆分
         all_range = list(range(len(self.train_dataset)))
-        data_len = int(len(self.train_dataset) / self.conf['no_models'])
+        data_len = int(len(self.train_dataset) / no_models)
         indices = all_range[id * data_len: (id + 1) * data_len]
         # 生成一个数据加载器
         self.train_loader = torch.utils.data.DataLoader(
@@ -57,7 +57,7 @@ class Local_Trainer:
                 loss.backward()
                 # 更新参数
                 optimizer.step()
-            print("Epoch %d done" % e)
+            print("Local epoch %d done" % e)
         # 创建差值字典（结构与模型参数同规格），用于记录差值
         diff = dict()
         for name, data in self.local_model.state_dict().items():

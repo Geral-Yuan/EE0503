@@ -44,13 +44,32 @@ def send_data_thread(sock, data):
     send_data(sock, data)
     print(f"Sent data size: {len(pickle.dumps(data))}")
 
+# 检查是否有新的连接
+def check_for_new_connections(local_socket, max_connections=10):
+    new_connected_sockets = []
+    new_connected_addresses = []
+    local_socket.settimeout(0.5)  # 设置超时时间，避免阻塞
+    try:
+        while len(new_connected_sockets) < max_connections:
+            try:
+                client_socket, client_addr = local_socket.accept()
+                new_connected_sockets.append(client_socket)
+                new_connected_addresses.append(client_addr)
+                print(f"New connection from {client_addr}")
+            except socket.timeout:
+                break  # 没有新连接
+    finally:
+        local_socket.settimeout(None)  # 恢复阻塞模式
+        return new_connected_sockets, new_connected_addresses
+
 if __name__ == '__main__':
 
     # 设置命令行程序
     parser = argparse.ArgumentParser(description='Federated Learning')
-    parser.add_argument('-c', '--conf', dest='conf')
-    parser.add_argument('-i', '--id', dest='id', default=0, type=int)
+    parser.add_argument('-c', '--conf', dest='conf', default='config.json', type=str)
+    # parser.add_argument('-i', '--id', dest='id', default=0, type=int)
     parser.add_argument("-p", "--port", dest="port", default=10000, type=int)
+    parser.add_argument("-f", "--first", dest="first", default=False, type=bool)
     # 获取所有的参数
     args = parser.parse_args()
 
@@ -60,23 +79,22 @@ if __name__ == '__main__':
     
     # ip_addr_list = ["192.168.137.14", "192.168.137.148", "192.168.137.210", "192.168.137.202"]
     
-    id = args.id
     local_port = args.port
-    no_models = conf["no_models"]
-    
-    if no_models <= 1:
-        print("Number of models should be greater than 1")
-        exit(0)
-    
-    if id >= no_models:
-        print("ID should be less than the number of models")
-        exit(0)
+    head = args.first
+    id = None
+    no_models = None
+    addr_list = []
         
     # 创建本地服务器
     local_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    
+    # 允许地址重用
+    local_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    
     ip_addr = "localhost"
     # ip_addr = ip_addr_list[id]
-    local_socket.bind((ip_addr, local_port))
+    local_addr = (ip_addr, local_port)
+    local_socket.bind(local_addr)
     local_socket.listen(5)
     print("Listening on port", local_port)
     
@@ -87,23 +105,57 @@ if __name__ == '__main__':
     # server_addr = ip_addr_list[(id+1)%no_models]
     server_port = int(input("Please input the server port: "))
     # server_port = local_port
-    # 连接server结点同时接受client结点的连接请求
-    if id != 0:
-        # 连接server结点
-        local_client_socket.connect((server_addr, server_port))
-        
-        # 接受client结点的连接请求
-        client_socket, addr = local_socket.accept()
-        print("Got a connection from %s" % str(addr))
-    else:
+    # 建立环形拓扑结构     
+    if head:
+        id = 0
         # 接受client结点的连接请求
         client_socket, addr = local_socket.accept()
         print("Got a connection from %s" % str(addr))
         
         input("Press Enter to continue...")
         
+        # 连接server结点并发送id
+        local_client_socket.connect((server_addr, server_port))
+        send_data(local_client_socket, id)
+        
+        # 记录模型数量并发送给server结点
+        no_models = receive_data(client_socket) + 1
+        send_data(local_client_socket, no_models)
+        receive_data(client_socket)
+        
+        # 将环中结点地址在环上传递一圈
+        addr_list.append(local_addr)
+        send_data(local_client_socket, addr_list)
+        
+        addr_list = receive_data(client_socket)
+        
+        send_data(local_client_socket, addr_list)
+        receive_data(client_socket)
+        
+    else:
         # 连接server结点
         local_client_socket.connect((server_addr, server_port))
+        
+        # 接受client结点的连接请求并接收id
+        client_socket, addr = local_socket.accept()
+        print("Got a connection from %s" % str(addr))
+        client_id = receive_data(client_socket)
+        id = client_id + 1
+        
+        # 发送id给server结点
+        send_data(local_client_socket, id)
+        
+        # 记录模型数量并发送给server结点
+        no_models = receive_data(client_socket)
+        send_data(local_client_socket, no_models)
+        
+        # 将环中结点地址在环上传递一圈
+        addr_list = receive_data(client_socket)
+        addr_list.append(local_addr)
+        send_data(local_client_socket, addr_list)
+        
+        addr_list = receive_data(client_socket)
+        send_data(local_client_socket, addr_list)
     
 
     # 获取数据集, 加载描述信息
@@ -123,8 +175,14 @@ if __name__ == '__main__':
     local_model = MNISTNet()
     
     for e in range(conf["global_epochs"]):
+        # 将新连接的结点加入环中
+        new_connected_sockets, new_connected_addresses = check_for_new_connections(local_socket)
+        
+        # 打印本地信息
+        print(f"\nGlobal epoch: {e}\nNode id: {id}\nNumber of models: {no_models}\n")
+        
         # 拷贝本地模型进行本地训练得到参数差值
-        diff = Local_Trainer(conf, local_model, train_datasets, id).local_train(local_model)
+        diff = Local_Trainer(conf, no_models, local_model, train_datasets, id).local_train(local_model)
         flat_diff, shape_info = flatten_diff(diff)
         flat_diff *= train_ratio
         param_diff_blocks = split_flat_diff(flat_diff, no_models)
@@ -204,7 +262,8 @@ if __name__ == '__main__':
         acc = 100.0 * (float(correct) / float(dataset_size))  # 计算准确率
         total_l = total_loss / dataset_size  # 计算损失值
 
-        print("Epoch %d, acc: %f, loss: %f\n" % (e, acc, total_loss))
+        print("Global epoch %d, acc: %f, loss: %f\n" % (e, acc, total_loss))
         
-    local_socket.close()
     local_client_socket.close()
+    client_socket.close()
+    local_socket.close()
