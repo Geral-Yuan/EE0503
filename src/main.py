@@ -11,6 +11,16 @@ from local_trainer import *
 from model import *
 from partition_diff import *
 
+local_client_socket = None
+local_socket = None
+local_addr = None
+client_socket = None
+client_addr = None
+server_ip = None
+server_port = None
+
+stop_event = threading.Event()
+
 def send_data(sock, data):
     try:
         data = pickle.dumps(data)
@@ -38,6 +48,47 @@ def receive_data(sock):
     except (socket.error, pickle.UnpicklingError, ValueError) as e:
         print(f"Receive error: {e}")
         # 根据需要添加重试或记录日志的逻辑
+
+def connect_thread():
+    global local_client_socket, local_addr
+    local_client_socket.connect(local_addr)
+
+def self_ring():
+    global client_socket, client_addr
+    conn_thread = threading.Thread(target=connect_thread)
+    conn_thread.start()
+    client_socket, client_addr = local_socket.accept()
+    conn_thread.join()
+    
+
+def handle_come_in_connection():
+    global local_client_socket, local_socket, client_socket, client_addr, server_ip, server_port, stop_event
+    local_socket.settimeout(1)  # 设置1秒超时
+    while not stop_event.is_set():
+        try:
+            new_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            new_client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            new_client_socket, new_client_addr = local_socket.accept()
+            print(f"New connection from {new_client_addr}")
+            flag = receive_data(new_client_socket)
+            if flag:
+                client_socket.close()
+                client_socket = new_client_socket
+                client_addr = new_client_addr
+            else:
+                send_data(new_client_socket, (server_ip, server_port))
+                (server_ip, server_port) = receive_data(new_client_socket)
+                new_client_socket.close()
+                local_client_socket.close()
+                local_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                local_client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                local_client_socket.connect((server_ip, server_port))
+        
+        except socket.timeout:
+            continue  # 超时时继续循环，检查 stop_event 状态
+            
+        except Exception as e:
+            print(f"Exception in thread: {e}")
 
 # 用来发送数据的线程
 def send_data_thread(sock, data):
@@ -99,63 +150,62 @@ if __name__ == '__main__':
     print("Listening on port", local_port)
     
     local_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    local_client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     client_socket = None
+    client_addr = None
     
-    server_addr = "localhost"
-    # server_addr = ip_addr_list[(id+1)%no_models]
-    server_port = int(input("Please input the server port: "))
-    # server_port = local_port
-    # 建立环形拓扑结构     
+    server_ip = "localhost"
+    server_port = local_port
+    
+    if not head:
+        # server_ip = ip_addr_list[(id+1)%no_models]
+        server_port = int(input("Please input the server port: "))
+        # server_port = local_port
+    
+    # 建立环形拓扑结构
     if head:
+        self_ring()
+        
+        acpt_thread = threading.Thread(target=handle_come_in_connection)
+        acpt_thread.start()
+        
+        input("Press Enter to continue ...\n")
+        
+        stop_event.set()
+        acpt_thread.join()
+        
         id = 0
-        # 接受client结点的连接请求
-        client_socket, addr = local_socket.accept()
-        print("Got a connection from %s" % str(addr))
-        
-        input("Press Enter to continue...")
-        
-        # 连接server结点并发送id
-        local_client_socket.connect((server_addr, server_port))
-        send_data(local_client_socket, id)
-        
-        # 记录模型数量并发送给server结点
+        send_data(local_client_socket, 0)
         no_models = receive_data(client_socket) + 1
         send_data(local_client_socket, no_models)
         receive_data(client_socket)
-        
-        # 将环中结点地址在环上传递一圈
-        addr_list.append(local_addr)
-        send_data(local_client_socket, addr_list)
-        
-        addr_list = receive_data(client_socket)
-        
-        send_data(local_client_socket, addr_list)
-        receive_data(client_socket)
-        
+
     else:
-        # 连接server结点
-        local_client_socket.connect((server_addr, server_port))
+        local_client_socket.connect((server_ip, server_port))
+        send_data(local_client_socket, False)
+        (server_ip, server_port) = receive_data(local_client_socket)
+        send_data(local_client_socket, local_addr)
+        client_socket, client_addr = local_socket.accept()
+        local_client_socket.close()
+        local_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        local_client_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        local_client_socket.connect((server_ip, server_port))
+        send_data(local_client_socket, True)
+        print("Got a connection from %s" % str(client_addr))
         
-        # 接受client结点的连接请求并接收id
-        client_socket, addr = local_socket.accept()
-        print("Got a connection from %s" % str(addr))
-        client_id = receive_data(client_socket)
-        id = client_id + 1
+        acpt_thread = threading.Thread(target=handle_come_in_connection)
+        acpt_thread.start()
         
-        # 发送id给server结点
+        
+        input("Press Enter to continue ...\n")
+        
+        stop_event.set()
+        acpt_thread.join()
+        
+        id = receive_data(client_socket) + 1
         send_data(local_client_socket, id)
-        
-        # 记录模型数量并发送给server结点
         no_models = receive_data(client_socket)
         send_data(local_client_socket, no_models)
-        
-        # 将环中结点地址在环上传递一圈
-        addr_list = receive_data(client_socket)
-        addr_list.append(local_addr)
-        send_data(local_client_socket, addr_list)
-        
-        addr_list = receive_data(client_socket)
-        send_data(local_client_socket, addr_list)
     
 
     # 获取数据集, 加载描述信息
